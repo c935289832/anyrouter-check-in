@@ -14,6 +14,10 @@ class NotificationKit:
 		self.email_sender: str = os.getenv('EMAIL_SENDER', '')
 		self.smtp_server: str = os.getenv('CUSTOM_SMTP_SERVER', '')
 		self.pushplus_token = os.getenv('PUSHPLUS_TOKEN')
+		self.wxpusher_app_token = os.getenv('WXPUSHER_APP_TOKEN', '').strip()
+		self.wxpusher_uids = [
+			uid.strip() for uid in os.getenv('WXPUSHER_UIDS', '').replace('\n', ',').split(',') if uid.strip()
+		]
 		self.server_push_key = os.getenv('SERVERPUSHKEY')
 		self.dingding_webhook = os.getenv('DINGDING_WEBHOOK')
 		self.feishu_webhook = os.getenv('FEISHU_WEBHOOK')
@@ -81,6 +85,46 @@ class NotificationKit:
 
 		data = {'token': self.pushplus_token, 'title': title, 'content': content, 'template': 'html'}
 		self._post_json('PushPlus', 'http://www.pushplus.plus/send', data)
+
+	def send_wxpusher(self, title: str, content: str):
+		if not self.wxpusher_app_token or not self.wxpusher_uids:
+			raise ValueError('WxPusher App Token or UIDs not configured')
+
+		data = {
+			'appToken': self.wxpusher_app_token,
+			'content': f'{title}\n\n{content}',
+			'summary': title[:100],
+			'contentType': 1,
+			'uids': self.wxpusher_uids,
+		}
+		# WxPusher 使用独立的成功码 1000，不能复用其他通道的 0/200 校验。
+		with httpx.Client(timeout=30.0) as client:
+			response = client.post('https://wxpusher.zjiecode.com/api/send/message', json=data)
+
+		if response.status_code >= 400:
+			raise RuntimeError(f'WxPusher request failed: HTTP {response.status_code}')
+
+		try:
+			payload = response.json()
+		except ValueError as e:
+			raise RuntimeError('WxPusher request failed: invalid JSON response') from e
+
+		if not isinstance(payload, dict):
+			raise RuntimeError('WxPusher request failed: invalid response')
+		if payload.get('code') != 1000 or payload.get('success') is False:
+			error_msg = payload.get('msg') or payload.get('code') or 'unknown error'
+			raise RuntimeError(f'WxPusher request failed: {error_msg}')
+
+		# 顶层成功不代表每个接收者都成功，逐个检查发送任务是否创建成功。
+		results = payload.get('data')
+		if not isinstance(results, list) or not results:
+			raise RuntimeError('WxPusher request failed: invalid delivery results')
+		for result in results:
+			if not isinstance(result, dict):
+				raise RuntimeError('WxPusher request failed: invalid delivery result')
+			if result.get('code') != 1000:
+				error_msg = result.get('status') or result.get('msg') or result.get('code') or 'unknown delivery error'
+				raise RuntimeError(f'WxPusher request failed: {error_msg}')
 
 	def send_serverPush(self, title: str, content: str):
 		if not self.server_push_key:
@@ -161,6 +205,7 @@ class NotificationKit:
 		notifications = [
 			('Email', lambda: self.send_email(title, content, msg_type)),
 			('PushPlus', lambda: self.send_pushplus(title, content)),
+			('WxPusher', lambda: self.send_wxpusher(title, content)),
 			('Server Push', lambda: self.send_serverPush(title, content)),
 			('DingTalk', lambda: self.send_dingtalk(title, content)),
 			('Feishu', lambda: self.send_feishu(title, content)),

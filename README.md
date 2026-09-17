@@ -315,6 +315,20 @@ PROVIDERS={"agentrouter":{"use_proxy":true}}
 
 - `PUSHPLUS_TOKEN`: PushPlus 的 Token
 
+### WxPusher 推送
+
+- `WXPUSHER_APP_TOKEN`: 在 [WxPusher 管理后台](https://wxpusher.zjiecode.com/admin/) 创建应用后获取的 AppToken（`AT_` 开头，不是极简推送的 SPT）
+- `WXPUSHER_UIDS`: 接收消息的用户 UID（`UID_` 开头）；多个 UID 用英文逗号或换行分隔
+
+配置步骤：
+
+1. 创建 WxPusher 应用，让接收消息的用户扫码关注该应用，并获取对应 UID。
+2. 在本仓库 `Settings → Environments → production → Environment secrets` 中添加 `WXPUSHER_APP_TOKEN` 和 `WXPUSHER_UIDS`；也支持仓库级 Actions secrets。
+3. 本地运行时，将同名变量写入 `.env`。不要把真实 AppToken 提交到仓库。
+4. WxPusher 复用原有通知触发条件：首次运行、余额变化或签到失败时推送；所有账号成功且余额未变化时不推送。
+
+消息以纯文本发送，包含标题和签到详情。不配置 WxPusher 或推送失败均不会中断签到及其他通知通道；接口受理成功不等于客户端已收到消息。
+
 ### Server 酱
 
 - `SERVERPUSHKEY`: Server 酱的 SendKey

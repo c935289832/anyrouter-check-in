@@ -20,6 +20,8 @@ def notification_kit(monkeypatch):
 	monkeypatch.setenv('EMAIL_PASS', 'email_password')
 	monkeypatch.setenv('EMAIL_TO', 'receiver@example.com')
 	monkeypatch.setenv('PUSHPLUS_TOKEN', 'pushplus_token')
+	monkeypatch.setenv('WXPUSHER_APP_TOKEN', 'AT_test_token')
+	monkeypatch.setenv('WXPUSHER_UIDS', 'UID_test_user')
 	monkeypatch.setenv('SERVERPUSHKEY', 'server_push_key')
 	monkeypatch.setenv('DINGDING_WEBHOOK', 'https://oapi.dingtalk.com/robot/send?access_token=test_token')
 	monkeypatch.setenv('FEISHU_WEBHOOK', 'https://open.feishu.cn/open-apis/bot/v2/hook/test_token')
@@ -161,6 +163,7 @@ def test_push_message(notification_kit, monkeypatch):
 	send_methods = [
 		'send_email',
 		'send_pushplus',
+		'send_wxpusher',
 		'send_serverPush',
 		'send_dingtalk',
 		'send_feishu',
