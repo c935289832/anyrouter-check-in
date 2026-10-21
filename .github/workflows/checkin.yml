@@ -88,6 +88,7 @@ jobs:
 
     - name: 执行签到
       env:
+        CHECKIN_PROXY_URL: ${{ secrets.AGENTROUTER_PROXY_URL }}
         DEBUG_MODE: ${{ env.DEBUG_MODE }}
         CHECKIN_HEADLESS: false
         CHECKIN_HUMANIZE: true
