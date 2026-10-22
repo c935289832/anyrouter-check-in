@@ -272,11 +272,37 @@
 
 ## 代理配置（可选）
 
-内置的 `agentrouter` 默认 `use_proxy: true`。如果你的运行环境访问该平台不稳定，可以在 GitHub Actions 中配置 mihomo 订阅代理。
+内置的 `agentrouter` 默认 `use_proxy: true`，`anyrouter` 默认直连，不参与下面的重试。
+
+### AgentRouter 固定代理与失败兜底
+
+在 Settings -> Environments -> production 中配置：
+
+| 类型 | 名称 | 含义 |
+| --- | --- | --- |
+| Secret | `AGENTROUTER_PROXY_URL` | 首选 HTTP/HTTPS 代理，workflow 映射为 `CHECKIN_PROXY_URL` |
+| Secret | `AGENTROUTER_PROXY_FALLBACKS` | 备用 HTTP/HTTPS 代理的 JSON 数组，或每行一个 URL，按顺序使用 |
+| Variable | `AGENTROUTER_MAX_RETRIES` | **额外**重试次数，默认 `3`，即每个账号最多首试 + 3 次 = **4 次**；`0` 关闭 |
+
+每个 AgentRouter 账号独立从首选代理开始。WAF、浏览器启动、登录、网络、非 JSON 响应、API 拒绝等任何导致该次流程失败的结果或异常，都会换下一个未用节点，**重新执行完整流程**；成功立即停止。切换后重新获取 WAF Cookie，邮箱登录使用全新临时浏览器，不复用上个出口的 Profile。一次流程的浏览器和 HTTP 请求固定同一代理，TLS 校验保持开启；失败尝试不增加账号统计数量。
+
+例如：
+
+```dotenv
+CHECKIN_PROXY_URL=https://PRIMARY_HOST:443
+AGENTROUTER_PROXY_FALLBACKS=["https://FALLBACK_HOST1:443","https://FALLBACK_HOST2:443","https://FALLBACK_HOST3:443"]
+AGENTROUTER_MAX_RETRIES=3
+```
+
+备用池应选择**不同实际公网出口 IP**，域名别名不代表换 IP。程序去重相同主机/端口，不循环使用已尝试节点；备用池不足时会提前耗尽，并保留账号失败结果。无备用池就只尝试首选；重试次数必须为非负整数，无效值会警告并使用默认 `3`。代理暂时可用不保证稍后或认证签到成功，失效 Cookie/账号权限问题也不一定能靠换 IP 修复。`use_proxy: false` 可显式关闭该平台代理与轮换。
+
+未设置 `CHECKIN_PROXY_URL` 时首试保持原有直连行为，失败后仍可使用备用池。所有 HTTP 客户端禁用隐式环境代理，确保 `anyrouter` 直连且浏览器/HTTP 路由一致。日志只显示代理端点，不显示 URL 中的账号密码。
+
+### Mihomo 订阅（可选）
 
 在仓库 Settings -> Environments -> production -> Environment secrets 中添加：
 
-- `PROXY_SUBSCRIPTION_URL`：Clash/Mihomo 订阅链接。设置后，workflow 会运行 `scripts/setup_mihomo_proxy.sh`，启动本地代理并写入 `CHECKIN_PROXY_URL`。
+- `PROXY_SUBSCRIPTION_URL`：Clash/Mihomo 订阅链接。设置后，workflow 会运行 `scripts/setup_mihomo_proxy.sh`，启动 runner 本地代理。当前签到步骤显式使用 `AGENTROUTER_PROXY_URL`，若使用此桥接，请把该 Secret 设为 runner 本地地址（例如 `http://127.0.0.1:7890`）。它不是用户电脑上的本地端口。
 
 本地运行时也可以直接使用已有代理：
 

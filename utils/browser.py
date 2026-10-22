@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from utils.debug import debug_print, is_debug_enabled
 from utils.popups import dismiss_popups, setup_popup_guard
-from utils.proxy import get_playwright_proxy
+from utils.proxy import get_playwright_proxy, redact_proxy_url
 
 if TYPE_CHECKING:
 	from playwright.async_api import BrowserContext, Locator, Page
@@ -215,7 +215,7 @@ async def launch_login_context(settings: BrowserLoginSettings, *, use_proxy: boo
 	if proxy:
 		launch_kwargs['proxy'] = proxy
 		if is_debug_enabled():
-			print(f'[INFO] Browser proxy enabled: {proxy["server"]}')
+			print(f'[INFO] Browser proxy enabled: {redact_proxy_url(proxy["server"])}')
 		else:
 			print('[INFO] Browser proxy enabled')
 	elif use_proxy:

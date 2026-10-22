@@ -89,6 +89,8 @@ jobs:
     - name: 执行签到
       env:
         CHECKIN_PROXY_URL: ${{ secrets.AGENTROUTER_PROXY_URL }}
+        AGENTROUTER_PROXY_FALLBACKS: ${{ secrets.AGENTROUTER_PROXY_FALLBACKS }}
+        AGENTROUTER_MAX_RETRIES: ${{ vars.AGENTROUTER_MAX_RETRIES || '3' }}
         DEBUG_MODE: ${{ env.DEBUG_MODE }}
         CHECKIN_HEADLESS: false
         CHECKIN_HUMANIZE: true

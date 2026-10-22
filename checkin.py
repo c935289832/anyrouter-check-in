@@ -36,7 +36,13 @@ from utils.browser import (
 from utils.config import AccountConfig, AppConfig, load_accounts_config
 from utils.debug import debug_print, is_debug_enabled
 from utils.notify import notify
-from utils.proxy import get_playwright_proxy, get_proxy_server
+from utils.proxy import (
+	get_agentrouter_proxy_attempts,
+	get_playwright_proxy,
+	get_proxy_server,
+	proxy_attempt,
+	redact_proxy_url,
+)
 
 load_dotenv()
 
@@ -145,6 +151,8 @@ async def login_with_credentials(
 	provider_name: str,
 	email: str,
 	password: str,
+	*,
+	fresh_profile: bool = False,
 ) -> BrowserLoginResult | None:
 	"""使用邮箱密码通过浏览器登录，返回 cookies 与拦截到的 api user id。"""
 	print(f'[PROCESSING] {account_name}: Logging in with email/password...')
@@ -153,7 +161,7 @@ async def login_with_credentials(
 	settings = load_browser_login_settings(
 		account_name,
 		provider_name,
-		persist_profile=provider_config.persist_profile,
+		persist_profile=provider_config.persist_profile and not fresh_profile,
 	)
 	timeout_ms = settings.wait_timeout_ms
 
@@ -274,6 +282,9 @@ async def prepare_cookies(account_name: str, provider_config, user_cookies: dict
 	else:
 		print(f'[INFO] {account_name}: Bypass WAF not required, using user cookies directly')
 
+	if provider_config.name == 'agentrouter':
+		# Fresh cookies are tied to this attempt's exit; never overwrite them with stale input.
+		return {**user_cookies, **waf_cookies}
 	return {**waf_cookies, **user_cookies}
 
 
@@ -351,6 +362,44 @@ def format_check_in_notification(detail: dict) -> str:
 
 
 async def check_in_account(account: AccountConfig, account_index: int, app_config: AppConfig):
+	"""Retry the complete AgentRouter flow, not just the failed HTTP request."""
+	provider = app_config.get_provider(account.provider)
+	if account.provider != 'agentrouter' or not provider or not provider.use_proxy:
+		return await _check_in_account_once(account, account_index, app_config)
+
+	account_name = account.get_display_name(account_index)
+	servers = get_agentrouter_proxy_attempts()
+	result = (False, None, None)
+	for attempt, server in enumerate(servers, 1):
+		print(f'[PROXY] {account_name}: Attempt {attempt}/{len(servers)} via {redact_proxy_url(server)}')
+		try:
+			with proxy_attempt(server):
+				result = await _check_in_account_once(
+					account,
+					account_index,
+					app_config,
+					fresh_profile=attempt > 1,
+				)
+		except Exception as exc:
+			# Exception text may contain credentials/cookies; the type is safe to log here.
+			print(f'[FAILED] {account_name}: Attempt {attempt} raised {type(exc).__name__}')
+			result = (False, None, None)
+		if result[0]:
+			return result
+		if attempt < len(servers):
+			print(f'[RETRY] {account_name}: Attempt failed; switching proxy and restarting the full sign-in flow')
+
+	print(f'[FAILED] {account_name}: All {len(servers)} available proxy attempt(s) failed; no retries remain')
+	return result
+
+
+async def _check_in_account_once(
+	account: AccountConfig,
+	account_index: int,
+	app_config: AppConfig,
+	*,
+	fresh_profile: bool = False,
+):
 	"""为单个账号执行签到操作"""
 	account_name = account.get_display_name(account_index)
 	print(f'\n[PROCESSING] Starting to process {account_name}')
@@ -375,6 +424,7 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 			account.provider,
 			account.email,
 			account.password,
+			fresh_profile=fresh_profile,
 		)
 		if login_result:
 			all_cookies = login_result.cookies
@@ -417,12 +467,12 @@ def run_check_in_requests(
 ) -> tuple[bool, dict | None, dict | None]:
 	"""执行 HTTP 签到请求（同步，避免在 async 上下文中使用阻塞 httpx）。"""
 	try:
-		client_kwargs: dict = {'http2': True, 'timeout': 30.0}
+		client_kwargs: dict = {'http2': True, 'timeout': 30.0, 'trust_env': False}
 		proxy_url = get_proxy_server(use_proxy=use_proxy)
 		if proxy_url:
 			client_kwargs['proxy'] = proxy_url
 			if is_debug_enabled():
-				print(f'[INFO] {account_name}: HTTP client proxy enabled: {proxy_url}')
+				print(f'[INFO] {account_name}: HTTP client proxy enabled: {redact_proxy_url(proxy_url)}')
 			else:
 				print(f'[INFO] {account_name}: HTTP client proxy enabled')
 		elif use_proxy:
@@ -479,7 +529,7 @@ async def main():
 		print('[INFO] DEBUG_MODE enabled')
 		proxy_server = os.getenv('CHECKIN_PROXY_URL', '').strip()
 		if proxy_server:
-			print(f'[INFO] Proxy endpoint available: {proxy_server} (enabled per provider use_proxy)')
+			print(f'[INFO] Proxy endpoint available: {redact_proxy_url(proxy_server)} (enabled per provider use_proxy)')
 		else:
 			print('[INFO] CHECKIN_PROXY_URL not set; providers with use_proxy=true will run without proxy')
 	else:
